@@ -95,6 +95,7 @@ window.__ModuleLoader__.load({
     function apply(ctx) {
       ctx.effect(() => ctx.locale.register(NS, copy), "ui-winuxsh: dictionaries");
       ctx.slots.inject("settings.plugin.item", () => ctx.slots.register({
+        key: "winuxsh",
         name: "settings.plugin.item",
         id: "winuxsh",
         order: -10,
@@ -102,12 +103,12 @@ window.__ModuleLoader__.load({
       }, WinuxshCard));
       ctx.slots.inject("conversation.session.header.utilities", () => ctx.slots.register({
         name: "conversation.session.header.utilities",
-        id: "session-log-download",
+        id: "winuxsh-session-log-download",
         order: 0,
       }, EmptyExportUtility));
       ctx.slots.inject("conversation.session.header.actions", () => ctx.slots.register({
         name: "conversation.session.header.actions",
-        id: "session-log-download-action",
+        id: "winuxsh-session-log-download-action",
         order: 100,
         locale: NS,
         inject: () => ({
