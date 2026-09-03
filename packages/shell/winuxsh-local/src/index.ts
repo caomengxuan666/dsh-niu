@@ -1,11 +1,11 @@
 /**
- * Local Winuxsh Service Provider for the bash capability seam. Each command
- * runs as `<winuxsh> -c <command>` in a managed process spawned through
+ * Local Niubash Service Provider for the bash capability seam. Each command
+ * runs as `<niu> -c <command>` in a managed process spawned through
  * `ctx.subprocess`, with the PowerShell executor family's process lifecycle,
  * output collection, deadlines, cause classification, and model-friendly
- * environment inherited from `@deepseek-ai/dsh-pwsh-local`. Winuxsh is a
- * Windows-native shell with a bash-compatible `-c` command domain: the
- * command string is passed as ONE argv element and winuxsh parses the text
+ * environment inherited from `@deepseek-ai/dsh-pwsh-local`. Niubash is a
+ * Windows-native bash-compatible shell with a `-c` command domain: the
+ * command string is passed as ONE argv element and niu parses the text
  * itself, so no intermediate shell exists and there is no shell-quoting layer
  * to escape (the `bash -c` string domain applies as-is).
  *
@@ -58,7 +58,7 @@ export type ResolvedWinuxshConfig = Required<Omit<Config, 'cwd' | 'winuxshPath'>
 export { candidateWinuxshPaths, resolveWinuxshPath } from './resolve.ts'
 
 /**
- * Local Winuxsh executor over `ctx.subprocess` — the winuxsh twin of
+ * Local Niubash executor over `ctx.subprocess` — the Niubash twin of
  * `PwshLocalExecutor`. All process mechanics (bounded spill-backed output,
  * deadlines, kill escalation, background handles) are inherited; this
  * subclass supplies the winuxsh executable resolution, the `-c` argv, the

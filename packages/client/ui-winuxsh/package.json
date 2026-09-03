@@ -1,6 +1,6 @@
 {
   "name": "@cmx666/dsh-client-ui-winuxsh",
-  "description": "DSH Web settings card for the Winuxsh shell provider",
+  "description": "DSH Web settings card for the Niubash shell provider",
   "version": "0.1.0-rc.7",
   "type": "module",
   "main": "lib/index.js",

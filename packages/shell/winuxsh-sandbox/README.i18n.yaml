@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/shell/winuxsh-sandbox/README.md
-README.md: 20bc42c10145cac6b80ba8d84e30e653006b2dce
-README.zh.md: fde6d7c0e98a5a79d725ba84834a4a3089456641
+README.md: f4ef8fefd737c32b41e7b7e5a0d35af59078adfe
+README.zh.md: ae8899a16ebf3eb60b1b575176d67612976417cc

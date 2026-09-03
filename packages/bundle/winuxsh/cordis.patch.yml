@@ -1,4 +1,4 @@
-# Enable the Winuxsh shell provider and bash tool for Windows profiles.
+# Enable the Niubash shell provider and bash tool for Windows profiles.
 - id: pwsh-sandbox
   name: '@deepseek-ai/dsh-pwsh-sandbox'
   disabled: true
@@ -16,4 +16,4 @@
       name: '@cmx666/dsh-winuxsh-sandbox'
       disabled: false
       config:
-        pwshPath: winuxsh
+        winuxshPath: niu

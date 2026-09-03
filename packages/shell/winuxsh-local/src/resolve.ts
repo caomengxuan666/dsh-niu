@@ -5,10 +5,10 @@
  * resolved differently from the code under test could exempt a file whose
  * suites actually run.
  *
- * Winuxsh has no well-known install locations: the default discovery probes
- * PATH entries for `winuxsh[.exe]` and otherwise falls back to a bare
- * `winuxsh` that the operating system resolves through PATH (CreateProcess on
- * Windows applies PATHEXT, so a `.cmd`/`.bat` shim on PATH still works).
+ * Niubash ships as `niu[.exe]`; the default discovery probes every PATH entry
+ * for `niu[.exe]` first and falls back to the legacy `winuxsh[.exe]`, then to
+ * a bare `niu` that the operating system resolves through PATH (CreateProcess
+ * on Windows applies PATHEXT, so a `.cmd`/`.bat` shim on PATH still works).
  *
  * @module @deepseek-ai/dsh-winuxsh-local/resolve
  */
@@ -22,22 +22,33 @@ import { join } from 'node:path'
  * inputs on every platform.
  * @param env - the environment to probe; defaults to the process environment.
  * @param platform - the platform to resolve for; defaults to the process platform.
- * @returns candidate `winuxsh` executable paths in resolution order.
+ * @returns candidate paths in resolution order: every PATH entry's
+ *          `niu[.exe]` first, then every entry's legacy `winuxsh[.exe]`,
+ *          so a stale `winuxsh.exe` in an earlier PATH entry never shadows
+ *          a later entry's `niu.exe`.
  */
 export function candidateWinuxshPaths(
   env: NodeJS.ProcessEnv = process.env,
   platform: NodeJS.Platform = process.platform,
 ): string[] {
-  const executable = platform === 'win32' ? 'winuxsh.exe' : 'winuxsh'
+  // Niubash ships as `niu[.exe]`; keep `winuxsh[.exe]` as a legacy fallback so
+  // existing installs that have not renamed the binary still resolve. Prefer
+  // `niu` GLOBALLY: collect niu candidates across every PATH entry first,
+  // then winuxsh candidates, so an earlier PATH entry holding a stale
+  // winuxsh.exe never shadows a later entry's niu.exe.
+  const niuName = platform === 'win32' ? 'niu.exe' : 'niu'
+  const wshName = platform === 'win32' ? 'winuxsh.exe' : 'winuxsh'
   const delimiter = platform === 'win32' ? ';' : ':'
-  const candidates: string[] = []
+  const niuCandidates: string[] = []
+  const wshCandidates: string[] = []
   // PATH entries may carry surrounding quotes from `setx`-style definitions.
   for (const entry of (env.PATH ?? '').split(delimiter)) {
     const trimmed = entry.trim().replace(/^"|"$/g, '')
     if (trimmed.length === 0) continue
-    candidates.push(join(trimmed, executable))
+    niuCandidates.push(join(trimmed, niuName))
+    wshCandidates.push(join(trimmed, wshName))
   }
-  return candidates
+  return [...niuCandidates, ...wshCandidates]
 }
 
 /**
@@ -52,9 +63,6 @@ function candidateExists(candidate: string): boolean {
     const stat = lstatSync(candidate)
     return stat.isFile() || stat.isSymbolicLink()
   } catch {
-    // ENOENT (the candidate vanished between listing and probing) is the only
-    // expected failure; any other error names an unspawnable path, so false
-    // is the safe answer for it too.
     return false
   }
 }
@@ -65,7 +73,8 @@ function candidateExists(candidate: string): boolean {
  * @param env - the environment to probe; defaults to the process environment.
  * @param platform - the platform to resolve for; defaults to the process platform.
  * @returns the configured path verbatim, else the first existing PATH
- * candidate, else a bare `winuxsh` for PATH resolution.
+ * candidate (Niubash `niu[.exe]` preferred globally, legacy `winuxsh[.exe]`
+ * fallback), else a bare `niu` for PATH resolution.
  */
 export function resolveWinuxshPath(
   configured?: string,
@@ -76,5 +85,6 @@ export function resolveWinuxshPath(
   for (const candidate of candidateWinuxshPaths(env, platform)) {
     if (candidateExists(candidate)) return candidate
   }
-  return 'winuxsh'
+  return 'niu'
 }
+

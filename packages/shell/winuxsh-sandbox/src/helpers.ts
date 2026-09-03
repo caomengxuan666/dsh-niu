@@ -1,6 +1,6 @@
 /**
  * Internal sandbox-result classification helpers — deliberate call-for-call
- * mirror of `@deepseek-ai/dsh-pwsh-sandbox/src/helpers.ts` (the winuxsh twin
+ * mirror of `@deepseek-ai/dsh-pwsh-sandbox/src/helpers.ts` (the Niubash twin
  * of the bash consumer shares the identical classification dialect).
  *
  * @module @deepseek-ai/dsh-winuxsh-sandbox/helpers

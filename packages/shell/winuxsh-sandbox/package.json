@@ -1,6 +1,6 @@
 {
   "name": "@cmx666/dsh-winuxsh-sandbox",
-  "description": "Sandbox-consuming implementation of the DeepSeek Harness winuxsh executor seam (confines every command via ctx.sandbox, reports denial/enforcement result facts)",
+  "description": "Sandbox-consuming implementation of the DeepSeek Harness Niubash executor seam (confines every command via ctx.sandbox, reports denial/enforcement result facts)",
   "version": "0.1.0-rc.6",
   "publishConfig": {
     "access": "public"

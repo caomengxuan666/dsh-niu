@@ -1,7 +1,7 @@
 /**
- * Sandbox-consuming Winuxsh executor — the winuxsh twin of
+ * Sandbox-consuming Niubash executor — the Niubash twin of
  * `@deepseek-ai/dsh-pwsh-sandbox` (and through it of
- * `@deepseek-ai/dsh-bash-sandbox`). It wraps the exact local winuxsh argv
+ * `@deepseek-ai/dsh-bash-sandbox`). It wraps the exact local niu argv
  * through `ctx.sandbox` (which on Windows resolves to the ACL restricted-token
  * runner chain), inherits local process mechanics, and reports the selected
  * mode, enforcement, and denial facts. Positive runner-launch evidence means
@@ -41,7 +41,7 @@ import { classifyDenial, classifyRunnerFailure, isRunnerSpawnFailure, matchesSig
 export type Config = LocalConfig
 
 /**
- * Registers as `ctx.shell` in place of the local winuxsh executor and requires
+ * Registers as `ctx.shell` in place of the local Niubash executor and requires
  * a `ctx.sandbox` provider plus `ctx.sandboxPolicy`; the tool layer carries the
  * sandbox denial rendering and escalation surface. Tool calls pass the calling
  * session's resolved policy; direct calls fall back to deployment policy.

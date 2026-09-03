@@ -1,6 +1,6 @@
 {
   "name": "@cmx666/dsh-winuxsh-bundle",
-  "description": "DeepSeek Harness profile bundle that enables Winuxsh sandbox and tool-bash on Windows",
+  "description": "DeepSeek Harness profile bundle that enables Niubash sandbox and tool-bash on Windows",
   "version": "0.1.0-rc.8",
   "type": "module",
   "main": "cordis.patch.yml",

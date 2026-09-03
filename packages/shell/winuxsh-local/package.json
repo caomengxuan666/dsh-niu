@@ -1,6 +1,6 @@
 {
   "name": "@cmx666/dsh-winuxsh-local",
-  "description": "Local Winuxsh implementation of the DeepSeek Harness shell executor seam",
+  "description": "Local Niubash implementation of the DeepSeek Harness shell executor seam",
   "version": "0.1.0-rc.6",
   "publishConfig": { "access": "public" },
   "repository": { "type": "git", "url": "git+https://github.com/deepseek-ai/deepseek-harness.git", "directory": "packages/shell/winuxsh-local" },
