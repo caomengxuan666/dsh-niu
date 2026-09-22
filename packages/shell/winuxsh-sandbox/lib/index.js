@@ -5,7 +5,7 @@ class SandboxWinuxshExecutor extends SandboxPwshExecutor {
   static inject = ['subprocess', 'sandbox', 'sandboxPolicy']
 
   constructor(ctx, config = {}) {
-    const configured = config.winuxshPath ?? config.pwshPath
+    const configured = config.niuPath ?? config.winuxshPath ?? config.pwshPath
     super(ctx, { ...config, pwshPath: resolveWinuxshPath(configured) })
   }
 

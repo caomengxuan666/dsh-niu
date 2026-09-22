@@ -177,7 +177,7 @@ describe.skipIf(!winuxshAvailable())('SandboxWinuxshExecutor', () => {
     const call = calls[0]
     expect(call?.policy).toEqual(RO)
     // The confined argv is the winuxsh invocation, ready for a runner prefix.
-    expect(call?.argv[0]).toMatch(/winuxsh(\.exe)?$/u)
+    expect(call?.argv[0]).toMatch(/(?:winuxsh|niu)(\.exe)?$/u)
     expect(call?.argv).toContain('-c')
     expect(call?.argv.at(-1)).toContain('echo wrapped')
     expect(result.sandbox).toEqual({ mode: 'read-only', denied: false, enforcement: 'full' })

@@ -12,8 +12,8 @@
   disabled: true
 
 - insert:
-    - id: winuxsh-sandbox
+    - id: niu-sandbox
       name: '@cmx666/dsh-winuxsh-sandbox'
       disabled: false
       config:
-        winuxshPath: niu
+        niuPath: niu

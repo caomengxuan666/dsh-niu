@@ -16,7 +16,7 @@ Start DSH normally:
 dsh web
 ```
 
-The bundle enables `winuxsh-sandbox` and `tool-bash`, disables the PowerShell shell/tool rows, adds the Niubash card under Settings > Plugins, and moves Session export into the session action group.
+The bundle enables `niu-sandbox` and `tool-bash`, disables the PowerShell shell/tool rows, adds the Niubash card under Settings > Plugins, and moves Session export into the session action group.
 
 ## Packages
 

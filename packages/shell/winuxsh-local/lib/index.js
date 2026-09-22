@@ -5,7 +5,7 @@ import { PwshLocalExecutor } from '@deepseek-ai/dsh-pwsh-local'
 function resolveWinuxshPath(configured) {
   if (typeof configured === 'string' && configured.length > 0) return configured
   const delimiter = process.platform === 'win32' ? ';' : ':'
-  const executable = process.platform === 'win32' ? 'winuxsh.exe' : 'winuxsh'
+  const executable = process.platform === 'win32' ? 'niu.exe' : 'niu'
   for (const entry of (process.env.PATH ?? '').split(delimiter)) {
     const trimmed = entry.trim().replace(/^"|"$/g, '')
     if (trimmed.length === 0) continue
@@ -15,14 +15,14 @@ function resolveWinuxshPath(configured) {
       if (stat.isFile() || stat.isSymbolicLink()) return candidate
     } catch {}
   }
-  return 'winuxsh'
+  return 'niu'
 }
 
 class WinuxshLocalExecutor extends PwshLocalExecutor {
   static inject = ['subprocess']
 
   constructor(ctx, config = {}) {
-    const configured = config.winuxshPath ?? config.pwshPath
+    const configured = config.niuPath ?? config.winuxshPath ?? config.pwshPath
     super(ctx, { ...config, pwshPath: resolveWinuxshPath(configured) })
   }
 
