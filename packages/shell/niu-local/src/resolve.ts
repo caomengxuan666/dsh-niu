@@ -1,0 +1,90 @@
+/**
+ * Niubash executable resolution, dependency-free so non-package consumers
+ * (the repository's coverage-gate probe in `vitest.config.ts`) can share the
+ * ONE resolution definition with the executor and its suites — a probe that
+ * resolved differently from the code under test could exempt a file whose
+ * suites actually run.
+ *
+ * Niubash ships as `niu[.exe]`; the default discovery probes every PATH entry
+ * for `niu[.exe]` first and falls back to the legacy `niu[.exe]`, then to
+ * a bare `niu` that the operating system resolves through PATH (CreateProcess
+ * on Windows applies PATHEXT, so a `.cmd`/`.bat` shim on PATH still works).
+ *
+ * @module @cmx666/dsh-niu-local/resolve
+ */
+
+import { lstatSync } from 'node:fs'
+import { join } from 'node:path'
+
+/**
+ * PATH-derived niu executable candidates, platform-named. Explicitly
+ * parameterized (env, platform) so resolution is a pure function of its
+ * inputs on every platform.
+ * @param env - the environment to probe; defaults to the process environment.
+ * @param platform - the platform to resolve for; defaults to the process platform.
+ * @returns candidate paths in resolution order: every PATH entry's
+ *          `niu[.exe]` first, then every entry's legacy `niu[.exe]`,
+ *          so a stale `niu.exe` in an earlier PATH entry never shadows
+ *          a later entry's `niu.exe`.
+ */
+export function candidateNiubashPaths(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): string[] {
+  // Niubash ships as `niu[.exe]`; keep `niu[.exe]` as a legacy fallback so
+  // existing installs that have not renamed the binary still resolve. Prefer
+  // `niu` GLOBALLY: collect niu candidates across every PATH entry first,
+  // then niu candidates, so an earlier PATH entry holding a stale
+  // niu.exe never shadows a later entry's niu.exe.
+  const niuName = platform === 'win32' ? 'niu.exe' : 'niu'
+  const wshName = platform === 'win32' ? 'niu.exe' : 'niu'
+  const delimiter = platform === 'win32' ? ';' : ':'
+  const niuCandidates: string[] = []
+  const wshCandidates: string[] = []
+  // PATH entries may carry surrounding quotes from `setx`-style definitions.
+  for (const entry of (env.PATH ?? '').split(delimiter)) {
+    const trimmed = entry.trim().replace(/^"|"$/g, '')
+    if (trimmed.length === 0) continue
+    niuCandidates.push(join(trimmed, niuName))
+    wshCandidates.push(join(trimmed, wshName))
+  }
+  return [...niuCandidates, ...wshCandidates]
+}
+
+/**
+ * Whether a candidate can be spawned. lstat opens the entry itself instead of
+ * following reparse points, so it sees a Windows app execution alias where
+ * stat hits the target's ACL (EACCES); Node reports that alias as a symlink
+ * on current releases and as a plain file on older ones, and CreateProcess
+ * resolves either shape. A real directory never matches.
+ */
+function candidateExists(candidate: string): boolean {
+  try {
+    const stat = lstatSync(candidate)
+    return stat.isFile() || stat.isSymbolicLink()
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Resolve the niu executable this executor spawns.
+ * @param configured - an explicit `niuPath` config value, trusted as-is.
+ * @param env - the environment to probe; defaults to the process environment.
+ * @param platform - the platform to resolve for; defaults to the process platform.
+ * @returns the configured path verbatim, else the first existing PATH
+ * candidate (Niubash `niu[.exe]` preferred globally, legacy `niu[.exe]`
+ * fallback), else a bare `niu` for PATH resolution.
+ */
+export function resolveNiuPath(
+  configured?: string,
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  if (configured !== undefined && configured.length > 0) return configured
+  for (const candidate of candidateNiubashPaths(env, platform)) {
+    if (candidateExists(candidate)) return candidate
+  }
+  return 'niu'
+}
+

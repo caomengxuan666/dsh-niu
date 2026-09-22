@@ -1,0 +1,9 @@
+# @cmx666/dsh-niu-bundle
+
+Windows 上启用 Niubash 的一条命令 DSH profile bundle。
+
+```sh
+dsh plugin --profile web add @cmx666/dsh-niu-bundle
+```
+
+此 bundle 会安装 Niubash Provider，启用 `niu-sandbox` 和 `tool-bash`，并禁用 PowerShell shell/tool。请另外安装 Niubash，并确保 `niu.exe` 位于 `PATH`，然后正常启动 `dsh web`。
