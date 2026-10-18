@@ -1,3 +1,21 @@
-export const name = 'niu-local-invariant'
-export const inject = ['invariants']
-export const apply = (ctx) => Promise.resolve(ctx.invariants.register('@cmx666/dsh-niu-local', () => {}))
+/**
+ * Package-owned invariant companion for `@cmx666/dsh-niu-local`.
+ * @module @cmx666/dsh-niu-local/invariant
+ */
+const PACKAGE_NAME = '@cmx666/dsh-niu-local';
+/** Cordis companion plugin name. */
+export const name = 'niu-local-invariant';
+/** Service required before the companion can reserve package ownership. */
+export const inject = ['invariants'];
+/**
+ * No runtime invariant: this package exposes no independent event sequence or mutable data relation
+ * beyond contracts enforced at its owning seam.
+ */
+const install = () => { };
+/**
+ * Register this package's invariant companion.
+ * @param ctx - Cordis context carrying the invariant service.
+ * @returns the installed registration's disposer after setup succeeds.
+ */
+export const apply = (ctx) => Promise.resolve(ctx.invariants.register(PACKAGE_NAME, install));
+/* jscpd:ignore-end */

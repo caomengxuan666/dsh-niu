@@ -12,46 +12,36 @@
  * @module @cmx666/dsh-niu-local
  */
 
+import type { Volatile } from '@deepseek-ai/cordis'
 import { Context } from '@deepseek-ai/cordis'
-import z from '@deepseek-ai/schemastery'
-import { ENV_OVERRIDES, PwshLocalExecutor, assertServiceablePwshConfig } from '@deepseek-ai/dsh-pwsh-local'
-import type { Config as PwshConfig, ResolvedConfig } from '@deepseek-ai/dsh-pwsh-local'
-import type { ShellExecSpec } from '@deepseek-ai/dsh-shell'
-import { resolveNiuPath } from './resolve.ts'
+import type { ShellExecRequest, ShellExecSpec } from '@deepseek-ai/dsh-shell'
+import { PwshLocalExecutor } from '@deepseek-ai/dsh-pwsh-local'
+import type { Config as PwshConfig } from '@deepseek-ai/dsh-pwsh-local'
+import { candidateNiubashPaths, resolveNiuPath } from './resolve.ts'
 
-/* jscpd:ignore-start -- the executor mirrors the pwsh twin call-for-call by
-   design (inheriting its mechanics), so the schema and constants match */
-/** Default SIGTERM→SIGKILL grace period (the `graceMs` config). */
-const DEFAULT_GRACE_MS = 3_000
-
-/** Default per-stream spill cap (the `maxSpillBytes` config). */
-const DEFAULT_MAX_SPILL_BYTES = 64 * 1024 * 1024
-
-/** Plugin config (all optional — `static Config` supplies the defaults). */
-export interface Config {
-  /** Default working directory for commands (default: process.cwd()). */
-  cwd?: string
-  /** Default foreground timeout in milliseconds. */
-  timeoutMs?: number
-  /** Upper bound for per-call timeout overrides. */
-  maxTimeoutMs?: number
-  /** Per-stream in-memory output cap; overflow spills to a temp file. */
-  maxOutputBytes?: number
-  /** Per-stream spill-file cap; larger streams retain only their in-memory tail. */
-  maxSpillBytes?: number
-  /** Grace period for kill escalation and inherited pipes; at most `MAX_TIMER_DELAY_MS`. */
-  graceMs?: number
-  /**
-   * Explicit niu executable. When omitted, PATH entries are probed in
-   * order for `niu[.exe]`, falling back to a bare `niu` resolved
-   * through PATH.
-   */
+/**
+ * The config this executor receives: the inherited pwsh-shaped section
+ * (Volatile live budgets) plus the patch-supplied `niuPath`. The executable
+ * key is not part of the base schema, so a non-strict validation merges it
+ * through verbatim; {@link niuExecutable} adapts it onto the base's
+ * `pwshPath` reference.
+ */
+export type Config = PwshConfig & {
+  /** Explicit niu executable; absent probes PATH for `niu[.exe]`. */
   niuPath?: string
 }
 
-/** The shape after schemastery applied the defaults (cwd/niuPath have none). */
-export type ResolvedNiubashConfig = Required<Omit<Config, 'cwd' | 'niuPath'>> & Pick<Config, 'cwd' | 'niuPath'>
-/* jscpd:ignore-end */
+/**
+ * Project the caller-facing `niuPath` onto the base executor's `pwshPath`
+ * reference. The base re-resolves whenever the reference's value changes, so
+ * the niu discovery (PATH probing) stays live against config edits while the
+ * base's caching sees one stable value per resolved path.
+ * @param config - the received section carrying the raw `niuPath`.
+ * @returns a `pwshPath` reference that resolves the niu executable.
+ */
+function niuExecutable(config: Config): Volatile<string | undefined> {
+  return { get: () => resolveNiuPath(config.niuPath) }
+}
 
 // Resolution lives in its own dependency-free module so the repository's
 // coverage-gate probe shares the exact definition the suites use.
@@ -65,43 +55,8 @@ export { candidateNiubashPaths, resolveNiuPath } from './resolve.ts'
  * bash-like model-friendly environment, and niu-branded diagnostics.
  */
 export class NiuLocalExecutor extends PwshLocalExecutor {
-  /* jscpd:ignore-start -- schema mirrors the pwsh/bash executor family */
-  static override Config: z<Config> = z.object({
-    cwd: z.string(),
-    timeoutMs: z.number().default(120_000),
-    maxTimeoutMs: z.number().default(600_000),
-    maxOutputBytes: z.number().default(64_000),
-    maxSpillBytes: z.number().default(DEFAULT_MAX_SPILL_BYTES),
-    graceMs: z.number().default(DEFAULT_GRACE_MS),
-    niuPath: z.string(),
-  })
-  /* jscpd:ignore-end */
-
   constructor(ctx: Context, config: Config) {
-    // The base constructor reads the pwsh-shaped section through the virtual
-    // declaredExecutable()/resolveExecutable()/assertServiceable() hooks, so
-    // the cast only reconciles the differing optional config-key names.
-    super(ctx, config as unknown as PwshConfig)
-  }
-
-  /** Niubash-branded diagnostics from the inherited executor mechanics. */
-  protected override readonly diagnosticPrefix = 'niu-local'
-
-  /** Reject the resolved section with niu-branded messages. */
-  protected override assertServiceable(config: PwshConfig): void {
-    // Literal prefix, not the diagnosticPrefix field: the base constructor
-    // runs this hook before this subclass's field initializers execute.
-    assertServiceablePwshConfig(config, 'niu-local')
-  }
-
-  /** The declared executable from the niu-shaped resolved section. */
-  protected override declaredExecutable(config: ResolvedConfig): string | undefined {
-    return (config as unknown as ResolvedNiubashConfig).niuPath
-  }
-
-  /** Resolve the declared niu executable, or discover it through PATH. */
-  protected override resolveExecutable(declared: string | undefined): string {
-    return resolveNiuPath(declared)
+    super(ctx, { ...config, pwshPath: niuExecutable(config) })
   }
 
   /** The niu executable every command runs through. */
@@ -109,9 +64,14 @@ export class NiuLocalExecutor extends PwshLocalExecutor {
     return this.pwshPath
   }
 
-  /** Model-friendly env for the bash-compatible niu dialect. */
-  protected override envOverrides(): Readonly<Record<string, string>> {
-    return { ...ENV_OVERRIDES, TERM: 'dumb' }
+  /**
+   * Fill the spec, then stamp the bash-dialect terminal override. The base
+   * merges `spec.env` over its own overrides at spawn, so `TERM=dumb` (the
+   * `dsh-bash-local` dialect) applies unless the caller already set `TERM`.
+   */
+  override resolve(request: ShellExecRequest): ShellExecSpec {
+    const spec = super.resolve(request)
+    return { ...spec, env: { TERM: 'dumb', ...spec.env } }
   }
 
   /**

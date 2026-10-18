@@ -1,108 +1,123 @@
-/** The shared `bash` settings section as the niu executor family resolves it. */
+/**
+ * Live executor configuration for `@cmx666/dsh-niu-local`, exercised through
+ * the same Loader updates profile reconciliation performs: schema-declared
+ * volatile budgets update in place (the fiber and the executor instance
+ * survive), while the raw `niuPath` key is an ordinary value whose change
+ * re-instantiates the executor — re-running niu discovery against the new
+ * path. Mounted behind Loader, so the raw config stays editable after boot.
+ */
 
-import { describe, expect, it } from 'vitest'
-import { Context } from '@deepseek-ai/cordis'
-import type { Fiber } from '@deepseek-ai/cordis'
-import { SettingsProvider } from '@deepseek-ai/dsh-settings'
-import type { SettingsNamespace } from '@deepseek-ai/dsh-settings'
-import { SHELL_SETTINGS_NAMESPACE } from '@deepseek-ai/dsh-shell'
+import { describe, expect, it, onTestFinished } from 'vitest'
+import { Context, resolveConfig, type Plugin } from '@deepseek-ai/cordis'
+import Loader from '@deepseek-ai/cordis-plugin-loader'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import { NiuLocalExecutor } from '@cmx666/dsh-niu-local'
 
-/** The smallest real provider: one in-memory document, always writable. */
-class MemorySettings extends SettingsProvider {
-  doc: Record<string, unknown> = {}
-
-  get writable(): boolean {
-    return true
+function merge(base: Record<string, unknown>, patch: Record<string, unknown>): Record<string, unknown> {
+  const result = { ...base }
+  for (const [key, value] of Object.entries(patch)) {
+    const before = result[key]
+    result[key] = before && typeof before === 'object' && !Array.isArray(before)
+      && value && typeof value === 'object' && !Array.isArray(value)
+      ? merge(before as Record<string, unknown>, value as Record<string, unknown>) : value
   }
+  return result
+}
 
-  protected load(): Promise<Record<string, unknown>> {
-    return Promise.resolve(structuredClone(this.doc))
+/** Mount a consumer behind Loader and edit its raw configuration. */
+async function liveConfig(ctx: Context, plugin: Plugin, initial: object = {}) {
+  if (ctx.get('loader') === undefined) {
+    await ctx.plugin(Loader)
   }
-
-  protected persist(ns: SettingsNamespace, section: Record<string, unknown>): Promise<void> {
-    this.doc = { ...this.doc, [ns]: structuredClone(section) }
-    return Promise.resolve()
+  const name = `live-${Object.keys(ctx.loader.builtins).length}`
+  ctx.loader.builtins[name] = plugin
+  const options = { id: plugin.name ?? name, name: `cordis:${name}`, config: initial }
+  const id = await ctx.loader.create(options)
+  const entry = ctx.loader.resolve(id)
+  await entry.fiber!.await()
+  const replace = async (next: Record<string, unknown>) => {
+    const fiber = entry.fiber!
+    resolveConfig(fiber.runtime!, fiber.ctx.waterfall(fiber, 'internal/config', next, () => next))
+    await entry.update({ config: next })
+    await entry.fiber!.await()
+    ctx.emit('app-boot/config-reload')
+  }
+  return {
+    entry,
+    fiber: entry.fiber!,
+    update: (patch: Record<string, unknown>) => replace(merge(entry.options.config as Record<string, unknown>, patch)),
+    replace,
   }
 }
 
-async function boot(config: ConstructorParameters<typeof NiuLocalExecutor>[1] = {}): Promise<{
-  ctx: Context
-  settingsFiber: Fiber
-  executorFiber: Fiber
-  niu: NiuLocalExecutor
-}> {
+async function boot(initial: object = {}): Promise<{ ctx: Context; live: Awaited<ReturnType<typeof liveConfig>> }> {
   const ctx = new Context()
+  onTestFinished(() => ctx.fiber.dispose())
   await ctx.plugin(LocalSubprocessRuntime)
-  const settingsFiber = ctx.plugin(MemorySettings)
-  await settingsFiber.await()
-  const executorFiber = ctx.plugin(NiuLocalExecutor, { timeoutMs: 60_000, ...config })
-  await executorFiber.await()
-  return { ctx, settingsFiber, executorFiber, niu: ctx.shell as NiuLocalExecutor }
+  const live = await liveConfig(ctx, NiuLocalExecutor, { timeoutMs: 60_000, ...initial })
+  return { ctx, live }
 }
 
-describe('niu executor over the bash settings section', () => {
-  it('resolves the user layer over the composition entry', async () => {
-    const bench = await boot()
-    expect(bench.niu.config.timeoutMs).toBe(60_000)
-
-    await bench.ctx.settings.update(SHELL_SETTINGS_NAMESPACE, { timeoutMs: 5_000 })
-
-    expect(bench.niu.config.timeoutMs).toBe(5_000)
-    await bench.ctx.fiber.dispose()
+describe('niu executor live configuration', () => {
+  it('uses changed budgets for later commands without remounting the executor', async () => {
+    const { ctx, live } = await boot()
+    const before = live.fiber
+    await live.update({ timeoutMs: 5_000, maxOutputBytes: 1_024 })
+    expect(live.entry.fiber === before).toBe(true)
+    expect(ctx.shell.resolve({ command: 'echo ok' })).toMatchObject({ timeoutMs: 5_000, stdoutMaxBytes: 1_024 })
+    // A stored budget the executor cannot use fails the next command, not the profile write.
+    await live.update({ timeoutMs: 0 })
+    expect(() => ctx.shell.resolve({ command: 'echo ok' })).toThrow('timeoutMs must be a positive finite number')
+    await live.update({ timeoutMs: 5_000, graceMs: Number.MAX_SAFE_INTEGER })
+    expect(() => ctx.shell.resolve({ command: 'echo ok' })).toThrow('graceMs must be no greater')
+    await live.update({ graceMs: 200 })
+    expect(ctx.shell.resolve({ command: 'echo ok' }).timeoutMs).toBe(5_000)
+    await live.replace({})
+    expect(ctx.shell.resolve({ command: 'echo ok' }).timeoutMs).toBe(120_000)
   })
 
-  it('refuses a stored value the constructor would have rejected', async () => {
-    const bench = await boot()
+  it('re-resolves the executable when the stored niuPath changes', async () => {
+    const { ctx, live } = await boot({ niuPath: '/opt/first/niu' })
+    expect((ctx.shell as NiuLocalExecutor).niuPath).toBe('/opt/first/niu')
 
-    await expect(bench.ctx.settings.update(SHELL_SETTINGS_NAMESPACE, { timeoutMs: 0 }))
-      .rejects.toThrow(/niu-local: timeoutMs must be a positive finite number/)
+    await live.update({ niuPath: '/opt/second/niu' })
 
-    expect(bench.niu.config.timeoutMs).toBe(60_000)
-    await bench.ctx.fiber.dispose()
+    // The raw key is an ordinary value: the executor re-instantiates, and the
+    // fresh instance's discovery reads the new path.
+    expect((ctx.shell as NiuLocalExecutor).niuPath).toBe('/opt/second/niu')
   })
 
-  it('re-resolves the executable when the stored path changes', async () => {
-    const bench = await boot({ niuPath: '/opt/first/niu' })
-    expect(bench.niu.niuPath).toBe('/opt/first/niu')
+  it('keeps the resolved executable when an unrelated volatile field changes', async () => {
+    const { ctx, live } = await boot({ niuPath: '/opt/first/niu' })
+    const before = live.fiber
+    const resolved = (ctx.shell as NiuLocalExecutor).niuPath
 
-    await bench.ctx.settings.update(SHELL_SETTINGS_NAMESPACE, { niuPath: '/opt/second/niu' })
+    await live.update({ timeoutMs: 5_000 })
 
-    expect(bench.niu.niuPath).toBe('/opt/second/niu')
-    await bench.ctx.fiber.dispose()
+    // ctx.shell is a tracked proxy, so identity is asserted on the fiber the
+    // official pattern uses: a volatile-only change updates the references in
+    // place and re-instantiates nothing.
+    expect(live.entry.fiber === before).toBe(true)
+    expect((ctx.shell as NiuLocalExecutor).niuPath).toBe(resolved)
+    expect(ctx.shell.resolve({ command: 'echo ok' }).timeoutMs).toBe(5_000)
   })
 
-  it('keeps the resolved executable when an unrelated field changes', async () => {
-    const bench = await boot({ niuPath: '/opt/first/niu' })
-    const before = bench.niu.niuPath
+  it('falls back to the composition entry when the stored path is cleared', async () => {
+    const { ctx, live } = await boot({ niuPath: '/opt/first/niu' })
+    await live.update({ niuPath: '/opt/second/niu' })
+    expect((ctx.shell as NiuLocalExecutor).niuPath).toBe('/opt/second/niu')
 
-    await bench.ctx.settings.update(SHELL_SETTINGS_NAMESPACE, { timeoutMs: 5_000 })
+    await live.replace({ niuPath: '/opt/first/niu' })
 
-    expect(bench.niu.niuPath).toBe(before)
-    await bench.ctx.fiber.dispose()
+    expect((ctx.shell as NiuLocalExecutor).niuPath).toBe('/opt/first/niu')
   })
 
-  it('falls back to the composition entry when the settings provider detaches', async () => {
-    const bench = await boot({ niuPath: '/opt/first/niu' })
-    await bench.ctx.settings.update(SHELL_SETTINGS_NAMESPACE, { timeoutMs: 5_000, niuPath: '/opt/second/niu' })
-    expect(bench.niu.config.timeoutMs).toBe(5_000)
-    expect(bench.niu.niuPath).toBe('/opt/second/niu')
+  it('releases the shell registration when the executor unloads', async () => {
+    const { ctx, live } = await boot()
+    expect(ctx.get('shell')).toBeInstanceOf(NiuLocalExecutor)
 
-    await bench.settingsFiber.dispose()
+    await live.fiber.dispose()
 
-    expect(bench.niu.config.timeoutMs).toBe(60_000)
-    expect(bench.niu.niuPath).toBe('/opt/first/niu')
-    await bench.ctx.fiber.dispose()
-  })
-
-  it('releases the namespace when the executor unloads', async () => {
-    const bench = await boot()
-    expect(bench.ctx.settings.describe().map(row => String(row.ns))).toContain('shell')
-
-    await bench.executorFiber.dispose()
-
-    expect(bench.ctx.settings.describe().map(row => String(row.ns))).not.toContain('shell')
-    await bench.ctx.fiber.dispose()
+    expect(ctx.get('shell')).toBeUndefined()
   })
 })
