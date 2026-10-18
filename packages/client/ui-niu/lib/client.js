@@ -94,9 +94,9 @@ window.__ModuleLoader__.load({
 
     function apply(ctx) {
       ctx.effect(() => ctx.locale.register(NS, copy), "ui-niu: dictionaries");
-      ctx.slots.inject("settings.plugin.item", () => ctx.slots.register({
+      ctx.slots.inject("plugins.item", () => ctx.slots.register({
         key: "niu",
-        name: "settings.plugin.item",
+        name: "plugins.item",
         id: "niu",
         order: -10,
         locale: NS,
@@ -112,7 +112,7 @@ window.__ModuleLoader__.load({
         order: 100,
         locale: NS,
         inject: () => ({
-          request: (sessionId) => ctx.remote.commands.execute(sessionId, "/export"),
+          request: (sessionId) => ctx.remote.commands.execute(sessionId, "/export", []),
         }),
       }, SessionExportAction));
     }

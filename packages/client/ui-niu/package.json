@@ -1,7 +1,7 @@
 {
   "name": "@cmx666/dsh-client-ui-niu",
   "description": "DSH Web settings card for the Niubash shell provider",
-  "version": "0.1.0-rc.8",
+  "version": "0.2.0-rc.1",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -14,7 +14,7 @@
   "publishConfig": { "access": "public" },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/caomengxuan666/deepseek-harness-desktop.git",
+    "url": "git+https://github.com/caomengxuan666/dsh-niu.git",
     "directory": "packages/client/ui-niu"
   },
   "dsh": {
@@ -22,7 +22,8 @@
       "inject": [
         "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-ui-slots",
-        "@deepseek-ai/dsh-client-ui-settings"
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-plugin-manager"
       ],
       "platform": "web"
     }
@@ -30,8 +31,8 @@
   "peerDependencies": {
     "react": "^18.2.0",
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-client-locale": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-ui-settings": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-ui-slots": "^0.1.0-rc.6"
+    "@deepseek-ai/dsh-client-locale": "^0.2.0-rc.1",
+    "@deepseek-ai/dsh-client-ui-settings": "^0.2.0-rc.1",
+    "@deepseek-ai/dsh-client-ui-slots": "^0.2.0-rc.1"
   }
 }
