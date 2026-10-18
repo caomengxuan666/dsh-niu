@@ -10,25 +10,22 @@
  * local-executor semantics. The tool layer owns the escalation approval flow
  * through `ctx.approval`; this executor reports the sandbox facts the tool
  * renders.
+ *
+ * The confinement mechanics (per-call policy resolution, the
+ * `executeArgv` preparation hook, the per-process fact ledger, and the
+ * `onProcessDone` settlement classification) are inherited verbatim from
+ * `SandboxPwshExecutor`; this subclass supplies only the niu executable and
+ * its `-c` argv.
+ *
  * @module @cmx666/dsh-niu-sandbox
  */
 
 import { Context } from '@deepseek-ai/cordis'
-import type { ShellExecRequest, ShellExecSpec, ShellProcess, ShellRunResult } from '@deepseek-ai/dsh-shell'
-import { SandboxUnavailableError } from '@deepseek-ai/dsh-sandbox'
-import type {
-  ConfinedArgv,
-  ConfinedSandboxMode,
-  RunnerFailureRule,
-  SandboxEnforcement,
-  SandboxExecutionPolicy,
-  SandboxMode,
-  SandboxPolicy,
-} from '@deepseek-ai/dsh-sandbox'
-import type {} from '@deepseek-ai/dsh-sandbox-policy'
-import { NiuLocalExecutor } from '@cmx666/dsh-niu-local'
-import type { Config as LocalConfig } from '@cmx666/dsh-niu-local'
-import { classifyDenial, classifyRunnerFailure, isRunnerSpawnFailure, matchesSignature } from './helpers.ts'
+import type { Volatile } from '@deepseek-ai/cordis'
+import type { ShellExecSpec } from '@deepseek-ai/dsh-shell'
+import { SandboxPwshExecutor } from '@deepseek-ai/dsh-pwsh-sandbox'
+import type { Config as PwshSandboxConfig } from '@deepseek-ai/dsh-pwsh-sandbox'
+import { resolveNiuPath } from '@cmx666/dsh-niu-local'
 
 /**
  * Plugin config: the local executor's knobs, verbatim. The sandbox policy —
@@ -38,7 +35,20 @@ import { classifyDenial, classifyRunnerFailure, isRunnerSpawnFailure, matchesSig
  * runner choice is likewise the `ctx.sandbox` provider's config, not this
  * executor's.
  */
-export type Config = LocalConfig
+export type Config = PwshSandboxConfig & {
+  /** Explicit niu executable; absent probes PATH for `niu[.exe]`. */
+  niuPath?: string
+}
+
+/**
+ * Project the caller-facing `niuPath` onto the base executor's `pwshPath`
+ * reference so the inherited argv seam spawns niu.
+ * @param config - the received section carrying the raw `niuPath`.
+ * @returns a `pwshPath` reference that resolves the niu executable.
+ */
+function niuExecutable(config: Config): Volatile<string | undefined> {
+  return { get: () => resolveNiuPath(config.niuPath) }
+}
 
 /**
  * Registers as `ctx.shell` in place of the local Niubash executor and requires
@@ -48,142 +58,25 @@ export type Config = LocalConfig
  * `result.sandbox` reports the mode, enforcement, and denial facts the tool
  * renders.
  */
-/* jscpd:ignore-start -- deliberate call-for-call mirror of bash/pwsh-sandbox's executor */
-export class NiuSandboxExecutor extends NiuLocalExecutor {
+export class NiuSandboxExecutor extends SandboxPwshExecutor {
   static override inject = ['subprocess', 'sandbox', 'sandboxPolicy']
 
-  // No own Config: the sandbox default (mode + workspaceRoot) moved to
-  // ctx.sandboxPolicy, so this executor inherits NiuLocalExecutor's Config
-  // verbatim (the config catalog walks the inherited static).
-
-  private readonly mode: SandboxMode
-  /**
-   * Per-process confinement facts retained until settlement. Providers may
-   * vary enforcement and diagnostic dialect between overlapping calls, so a
-   * shared latest-wrap value would classify a process against the wrong facts.
-   * Unconfined processes have no entry.
-   */
-  private readonly processFacts = new Map<ShellProcess, {
-    mode: ConfinedSandboxMode
-    enforcement: SandboxEnforcement
-    denialSignatures: readonly string[]
-    runnerFailureRules: readonly RunnerFailureRule[]
-    runnerProgram: string | undefined
-    workdir: string
-  }>()
-
   constructor(ctx: Context, config: Config) {
-    super(ctx, config)
-    // The default mode is the capability fact used for schema advertisement;
-    // actual tool executions carry their resolved per-call policy.
-    this.mode = ctx.sandboxPolicy.defaultMode
+    super(ctx, { ...config, pwshPath: niuExecutable(config) })
   }
 
-  /** The configured default mode — the capability fact the tool layer reads. */
-  override get sandboxMode(): SandboxMode {
-    return this.mode
+  /** The niu executable every command runs through. */
+  get niuPath(): string {
+    return this.pwshPath
   }
 
   /**
-   * Stamp a complete per-call policy onto the spec. Tool calls supply the
-   * calling session's resolved mode and root; lower-level callers fall back to
-   * the deployment policy.
+   * The niu invocation argv for one resolved spec — the argv-level seam the
+   * inherited `confine` wraps through `ctx.sandbox.confine`.
    */
-  override resolve(request: ShellExecRequest): ShellExecSpec {
-    return { ...super.resolve(request), sandboxPolicy: request.sandboxPolicy ?? this.ctx.sandboxPolicy.resolve() }
-  }
-
-  override async run(spec: ShellExecSpec): Promise<ShellRunResult> {
-    const policy = spec.sandboxPolicy as SandboxExecutionPolicy
-    const { mode } = policy
-    if (mode === 'danger-full-access') {
-      const result = await super.run(spec)
-      return { ...result, sandbox: { mode, denied: false } }
-    }
-    const confined = this.confine(spec, { ...policy, mode })
-    let result: ShellRunResult
-    try {
-      result = await this.runArgv(spec, confined.argv)
-    } catch (error) {
-      // An upstream abort remains cancellation even when it prevents spawn.
-      if (spec.signal?.aborted === true) spec.signal.throwIfAborted()
-      if (isRunnerSpawnFailure(error, confined.argv[0], spec.workdir)) {
-        throw new SandboxUnavailableError(mode, String(error))
-      }
-      throw error
-    }
-    // Runner failure outranks denial because the command did not run. Carry
-    // the matched fatal line, not an informational line that preceded it.
-    const runnerFailure = classifyRunnerFailure(result.exitCode, result.stderr.text, confined.runnerFailureRules)
-    if (runnerFailure !== undefined) {
-      throw new SandboxUnavailableError(mode, runnerFailure.detail)
-    }
-    return { ...result, sandbox: { mode, denied: classifyDenial(result, confined.denialSignatures), enforcement: confined.enforcement } }
-  }
-
-  override start(spec: ShellExecSpec): ShellProcess {
-    const policy = spec.sandboxPolicy as SandboxExecutionPolicy
-    const { mode } = policy
-    if (mode === 'danger-full-access') return super.start(spec)
-    // Once startArgv returns, install facts synchronously; promise settlement
-    // cannot run before start() returns.
-    const confined = this.confine(spec, { ...policy, mode })
-    let proc: ShellProcess
-    try {
-      proc = this.startArgv(spec, confined.argv)
-    } catch (error) {
-      if (isRunnerSpawnFailure(error, confined.argv[0], spec.workdir)) {
-        throw new SandboxUnavailableError(mode, String(error))
-      }
-      throw error
-    }
-    const { enforcement, denialSignatures, runnerFailureRules } = confined
-    this.processFacts.set(proc, {
-      mode,
-      enforcement,
-      denialSignatures,
-      runnerFailureRules,
-      runnerProgram: confined.argv[0],
-      workdir: spec.workdir,
-    })
-    return proc
-  }
-
-  /**
-   * Stamp per-process sandbox facts before `done` settles. Full-access
-   * processes have no facts; signal deaths are not denials.
-   */
-  protected override onProcessDone(proc: ShellProcess, stderr: string, spawnFailed: boolean, spawnError?: unknown): void {
-    const facts = this.processFacts.get(proc)
-    if (facts !== undefined) {
-      this.processFacts.delete(proc)
-      // A rejected spawn never started the confined launch. Otherwise runner
-      // failure outranks denial because its diagnostics may contain denial terms.
-      const runnerFailed = spawnFailed
-        ? isRunnerSpawnFailure(spawnError, facts.runnerProgram, facts.workdir)
-        : classifyRunnerFailure(proc.exitCode, stderr, facts.runnerFailureRules) !== undefined
-      proc.sandbox = {
-        mode: facts.mode,
-        denied: !runnerFailed && matchesSignature(proc.exitCode, stderr, facts.denialSignatures),
-        enforcement: facts.enforcement,
-        ...(runnerFailed ? { runnerFailed } : {}),
-      }
-    }
-    super.onProcessDone(proc, stderr, spawnFailed, spawnError)
-  }
-
-  /**
-   * Wrap one niu invocation via the `ctx.sandbox` provider. Provider errors
-   * propagate unchanged; the returned argv is handed directly to the local
-   * executor's subprocess path.
-   * @param spec - resolved execution spec whose niu argv is confined.
-   * @param policy - resolved confined execution policy.
-   * @returns the provider's exact argv and settlement-classification facts.
-   */
-  private confine(spec: ShellExecSpec, policy: SandboxPolicy): ConfinedArgv {
-    return this.ctx.sandbox.confine(this.argv(spec), policy)
+  protected override argv(spec: ShellExecSpec): string[] {
+    return [this.niuPath, '-c', spec.command]
   }
 }
-/* jscpd:ignore-end */
 
 export default NiuSandboxExecutor

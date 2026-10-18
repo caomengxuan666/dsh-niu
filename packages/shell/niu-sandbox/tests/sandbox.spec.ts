@@ -5,6 +5,12 @@
  * `tests/acl.e2e.ts` (the ACL runner is provider-side, not executor-side).
  * Requires niu for the integration block (skips without it — same gate as
  * niu-local's suites); the helpers block is pure and always runs.
+ *
+ * 0.2.x seam: `execute()` publishes the handle after preparation and never
+ * throws for a spawn problem — the handle settles as `killed` and the
+ * foreground projection `result()` carries the failure, which the sandbox
+ * subclass maps to `SANDBOX_UNAVAILABLE` when the evidence is attributable
+ * to the confinement runner.
  */
 
 import { spawnSync } from 'node:child_process'
@@ -15,7 +21,9 @@ import { afterAll, describe, expect, it } from 'vitest'
 import { Context, Service } from '@deepseek-ai/cordis'
 import { SandboxProvider, SandboxUnavailableError } from '@deepseek-ai/dsh-sandbox'
 import type { ConfinedArgv, RunnerFailureRule, SandboxExecutionPolicy, SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
+import type { ShellExecution, ShellExecRequest, ShellRunResult } from '@deepseek-ai/dsh-shell'
 import { resolveNiuPath } from '@cmx666/dsh-niu-local'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { SandboxPolicyService } from '@deepseek-ai/dsh-sandbox-policy'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import { NiuSandboxExecutor } from '../src/index.ts'
@@ -54,17 +62,18 @@ function throwingSubprocessRuntime(error: unknown): new (ctx: Context) => Servic
 }
 
 async function setup(
-  behavior: (argv: readonly string[], policy: SandboxPolicy) => ConfinedArgv = passthrough,
+  behavior: (argv: readonly string[], policy: SandboxPolicy, signal?: AbortSignal) => ConfinedArgv | Promise<ConfinedArgv> = passthrough,
   subprocess: new (ctx: Context) => Service = LocalSubprocessRuntime,
 ): Promise<{ executor: NiuSandboxExecutor; calls: ConfineCall[] }> {
   const calls: ConfineCall[] = []
   class FakeSandboxProvider extends SandboxProvider {
-    confine(argv: readonly string[], policy: SandboxPolicy): ConfinedArgv {
+    async confine(argv: readonly string[], policy: SandboxPolicy, signal?: AbortSignal): Promise<ConfinedArgv> {
       calls.push({ argv: [...argv], policy })
-      return behavior(argv, policy)
+      return behavior(argv, policy, signal)
     }
   }
   const ctx = new Context()
+  await ctx.plugin(SessionProjectionRegistry)
   await ctx.plugin(FakeSandboxProvider)
   await ctx.plugin(SandboxPolicyService, { mode: 'workspace-write', workspaceRoot: spillDir })
   await ctx.plugin(subprocess)
@@ -73,6 +82,17 @@ async function setup(
   }
   await ctx.plugin(NiuSandboxExecutor, { graceMs: 200 })
   return { executor: ctx.shell as NiuSandboxExecutor, calls }
+}
+
+/** Foreground projection: the settled result of one execution. */
+async function run(executor: NiuSandboxExecutor, request: ShellExecRequest): Promise<ShellRunResult> {
+  const execution = await executor.execute(executor.resolve(request))
+  return execution.result()
+}
+
+/** Background projection: the live handle execute() publishes. */
+async function start(executor: NiuSandboxExecutor, request: ShellExecRequest): Promise<ShellExecution> {
+  return executor.execute(executor.resolve(request))
 }
 
 describe('helpers (pure)', () => {
@@ -167,11 +187,16 @@ describe.skipIf(!niuAvailable())('NiuSandboxExecutor', () => {
     rmSync(spillDir, { recursive: true, force: true })
   })
 
+  // POSIX-only denial device (mode-0555 scratch); win32 real-sandbox denial
+  // coverage lives in the pwsh twin's tests/acl.e2e.ts. A privileged runner
+  // (root) bypasses the mode bits, so the device needs an unprivileged user.
+  const denialDeviceWorks = process.platform !== 'win32' && (process.getuid?.() ?? 0) !== 0
+
   const RO: SandboxExecutionPolicy = { mode: 'read-only', workspaceRoot: '/ws' }
 
   it('wraps the exact niu argv through ctx.sandbox with the per-call policy', async () => {
     const { executor, calls } = await setup()
-    const result = await executor.run(executor.resolve({ command: 'echo wrapped', sandboxPolicy: RO }))
+    const result = await run(executor, { command: 'echo wrapped', sandboxPolicy: RO })
     expect(result.exitCode).toBe(0)
     expect(calls).toHaveLength(1)
     const call = calls[0]
@@ -186,14 +211,14 @@ describe.skipIf(!niuAvailable())('NiuSandboxExecutor', () => {
   it('advertises the deployment default mode and stamps the deployment policy when none rides the request', async () => {
     const { executor, calls } = await setup()
     expect(executor.sandboxMode).toBe('workspace-write')
-    const result = await executor.run(executor.resolve({ command: 'echo fallback' }))
+    const result = await run(executor, { command: 'echo fallback' })
     expect(result.exitCode).toBe(0)
     expect(calls[0]?.policy.mode).toBe('workspace-write')
   }, 30_000)
 
   it('danger-full-access bypasses confine entirely and stamps full-access facts', async () => {
     const { executor, calls } = await setup()
-    const result = await executor.run(executor.resolve({ command: 'echo full', sandboxPolicy: { mode: 'danger-full-access', workspaceRoot: '/ws' } }))
+    const result = await run(executor, { command: 'echo full', sandboxPolicy: { mode: 'danger-full-access', workspaceRoot: '/ws' } })
     expect(result.exitCode).toBe(0)
     expect(calls).toHaveLength(0)
     expect(result.sandbox).toEqual({ mode: 'danger-full-access', denied: false })
@@ -208,7 +233,9 @@ describe.skipIf(!niuAvailable())('NiuSandboxExecutor', () => {
       denialSignatures: [],
       runnerFailureRules: [],
     }))
-    await expect(executor.run(executor.resolve({ command: 'echo never', sandboxPolicy: RO, signal: controller.signal })))
+    // A signal already aborted at preparation rejects execute() itself with
+    // the caller's reason — never a runner-attribution error.
+    await expect(executor.execute(executor.resolve({ command: 'echo never', sandboxPolicy: RO, signal: controller.signal })))
       .rejects.toThrow('caller-cancel')
   }, 30_000)
 
@@ -216,12 +243,12 @@ describe.skipIf(!niuAvailable())('NiuSandboxExecutor', () => {
   // real-sandbox denial classification is covered by the pwsh twin's
   // tests/acl.e2e.ts (the ACL runner denies scratch paths — unit tests never
   // leave temp).
-  it.skipIf(process.platform === 'win32')('classifies a failed write against the backend denial dialect', async () => {
+  it.skipIf(!denialDeviceWorks)('classifies a failed write against the backend denial dialect', async () => {
     const { executor } = await setup()
-    const result = await executor.run(executor.resolve({
+    const result = await run(executor, {
       command: deniedWriteCommand,
       sandboxPolicy: RO,
-    }))
+    })
     expect(result.exitCode).not.toBe(0)
     expect(result.sandbox).toEqual({ mode: 'read-only', denied: true, enforcement: 'full' })
   }, 30_000)
@@ -233,11 +260,11 @@ describe.skipIf(!niuAvailable())('NiuSandboxExecutor', () => {
       denialSignatures: [],
       runnerFailureRules: [{ fatalSignatures: ['fake-runner: '] }],
     }))
-    await expect(executor.run(executor.resolve({ command: 'echo never-runs', sandboxPolicy: RO })))
-      .rejects.toThrow(SandboxUnavailableError)
+    const execution = await executor.execute(executor.resolve({ command: 'echo never-runs', sandboxPolicy: RO }))
+    await expect(execution.result()).rejects.toThrow(SandboxUnavailableError)
   }, 30_000)
 
-  it('a SYNCHRONOUS attributable spawn rejection in run() fails closed, an unattributable one rethrows', async () => {
+  it('a SYNCHRONOUS attributable spawn rejection fails closed, an unattributable one rethrows', async () => {
     const attributable = Object.assign(new Error('sync-enoent'), { code: 'ENOENT', syscall: 'spawn node', path: 'node' })
     const { executor: closed } = await setup(() => ({
       argv: ['node', '--', 'niu'],
@@ -245,16 +272,16 @@ describe.skipIf(!niuAvailable())('NiuSandboxExecutor', () => {
       denialSignatures: [],
       runnerFailureRules: [{ fatalSignatures: ['fake-runner: '] }],
     }), throwingSubprocessRuntime(attributable))
-    await expect(closed.run(closed.resolve({ command: 'echo never', sandboxPolicy: RO })))
-      .rejects.toThrow(SandboxUnavailableError)
+    const closedExecution = await closed.execute(closed.resolve({ command: 'echo never', sandboxPolicy: RO }))
+    await expect(closedExecution.result()).rejects.toThrow(SandboxUnavailableError)
 
     const foreign = Object.assign(new Error('sync-emfile'), { code: 'EMFILE', syscall: 'spawn', path: 'node' })
     const { executor: passthroughError } = await setup(undefined, throwingSubprocessRuntime(foreign))
-    await expect(passthroughError.run(passthroughError.resolve({ command: 'echo never', sandboxPolicy: RO })))
-      .rejects.toThrow('sync-emfile')
+    const foreignExecution = await passthroughError.execute(passthroughError.resolve({ command: 'echo never', sandboxPolicy: RO }))
+    await expect(foreignExecution.result()).rejects.toThrow('sync-emfile')
   }, 30_000)
 
-  it('a SYNCHRONOUS spawn rejection in start() follows the same attribution split', async () => {
+  it('a SYNCHRONOUS spawn rejection settles the background handle with the same attribution split', async () => {
     const attributable = Object.assign(new Error('sync-enoent-start'), { code: 'ENOENT', syscall: 'spawn node', path: 'node' })
     const { executor: closed } = await setup(() => ({
       argv: ['node', '--', 'niu'],
@@ -262,13 +289,21 @@ describe.skipIf(!niuAvailable())('NiuSandboxExecutor', () => {
       denialSignatures: [],
       runnerFailureRules: [{ fatalSignatures: ['fake-runner: '] }],
     }), throwingSubprocessRuntime(attributable))
-    expect(() => closed.start(closed.resolve({ command: 'echo never', sandboxPolicy: RO })))
-      .toThrow(SandboxUnavailableError)
+    const closedProc = await closed.execute(closed.resolve({ command: 'echo never', sandboxPolicy: RO }))
+    await closedProc.done
+    expect(closedProc.status).toBe('killed')
+    expect(closedProc.sandbox).toEqual({ mode: 'read-only', denied: false, enforcement: 'full', runnerFailed: true })
+    await expect(closedProc.result()).rejects.toThrow(SandboxUnavailableError)
 
     const foreign = Object.assign(new Error('sync-emfile-start'), { code: 'EMFILE', syscall: 'spawn', path: 'node' })
     const { executor: passthroughError } = await setup(undefined, throwingSubprocessRuntime(foreign))
-    expect(() => passthroughError.start(passthroughError.resolve({ command: 'echo never', sandboxPolicy: RO })))
-      .toThrow('sync-emfile-start')
+    const foreignProc = await passthroughError.execute(passthroughError.resolve({ command: 'echo never', sandboxPolicy: RO }))
+    await foreignProc.done
+    expect(foreignProc.status).toBe('killed')
+    // An unattributable rejection keeps the wrap's facts but not runnerFailed:
+    // the provider failure names no confinement runner.
+    expect(foreignProc.sandbox).toEqual({ mode: 'read-only', denied: false, enforcement: 'full' })
+    await expect(foreignProc.result()).rejects.toThrow('sync-emfile-start')
   }, 30_000)
 
   it('a runner that REFUSES at runtime (fatal signature, nonzero exit) fails closed too', async () => {
@@ -278,25 +313,26 @@ describe.skipIf(!niuAvailable())('NiuSandboxExecutor', () => {
       denialSignatures: [],
       runnerFailureRules: [{ fatalSignatures: ['fake-runner: '] }],
     }))
-    await expect(executor.run(executor.resolve({ command: 'echo never-runs', sandboxPolicy: RO })))
-      .rejects.toThrow(SandboxUnavailableError)
+    const execution = await executor.execute(executor.resolve({ command: 'echo never-runs', sandboxPolicy: RO }))
+    await expect(execution.result()).rejects.toThrow(SandboxUnavailableError)
   }, 30_000)
 
   it('background confined runs stamp clean facts at settlement', async () => {
     const { executor } = await setup()
-    const clean = executor.start(executor.resolve({ command: 'echo background-ok', sandboxPolicy: RO }))
+    const clean = await start(executor, { command: 'echo background-ok', sandboxPolicy: RO })
     await clean.done
     expect(clean.sandbox).toEqual({ mode: 'read-only', denied: false, enforcement: 'full' })
   }, 30_000)
 
-  // POSIX-only denial device (mode-0555 scratch); win32 real-sandbox denial
-  // coverage lives in the pwsh twin's tests/acl.e2e.ts.
-  it.skipIf(process.platform === 'win32')('background denied writes stamp denied facts at settlement', async () => {
+  // POSIX-only denial device (mode-0555 scratch; skipped for privileged
+  // runners); win32 real-sandbox denial coverage lives in the pwsh twin's
+  // tests/acl.e2e.ts.
+  it.skipIf(!denialDeviceWorks)('background denied writes stamp denied facts at settlement', async () => {
     const { executor } = await setup()
-    const denied = executor.start(executor.resolve({
+    const denied = await start(executor, {
       command: deniedWriteCommand,
       sandboxPolicy: RO,
-    }))
+    })
     await denied.done
     expect(denied.sandbox).toEqual({ mode: 'read-only', denied: true, enforcement: 'full' })
   }, 30_000)
@@ -308,20 +344,20 @@ describe.skipIf(!niuAvailable())('NiuSandboxExecutor', () => {
       denialSignatures: [],
       runnerFailureRules: [{ fatalSignatures: ['fake-runner: '] }],
     }))
-    const proc = executor.start(executor.resolve({ command: 'echo never', sandboxPolicy: RO }))
+    const proc = await start(executor, { command: 'echo never', sandboxPolicy: RO })
     await proc.done
     expect(proc.sandbox).toEqual({ mode: 'read-only', denied: false, enforcement: 'full', runnerFailed: true })
     // The failure note surfaces through the read path.
     const read = proc.readOutput()
-    expect(read.delta).toContain('spawn failed')
+    expect(read.delta).toContain('subprocess failed before reporting an outcome:')
   }, 30_000)
 
   it('danger-full-access background runs bypass confine and carry no facts', async () => {
     const { executor, calls } = await setup()
-    const proc = executor.start(executor.resolve({
+    const proc = await start(executor, {
       command: 'echo full-bg',
       sandboxPolicy: { mode: 'danger-full-access', workspaceRoot: '/ws' },
-    }))
+    })
     await proc.done
     expect(calls).toHaveLength(0)
     expect(proc.sandbox).toBeUndefined()

@@ -1,13 +1,13 @@
 {
   "name": "@cmx666/dsh-niu-sandbox",
   "description": "Sandbox-consuming implementation of the DeepSeek Harness Niubash executor seam (confines every command via ctx.sandbox, reports denial/enforcement result facts)",
-  "version": "0.1.0-rc.7",
+  "version": "0.2.0-rc.1",
   "publishConfig": {
     "access": "public"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/deepseek-ai/deepseek-harness.git",
+    "url": "git+https://github.com/caomengxuan666/dsh-niu.git",
     "directory": "packages/shell/niu-sandbox"
   },
   "type": "module",
@@ -22,32 +22,39 @@
       "types": "./lib/types/invariant.d.ts",
       "default": "./lib/invariant.js"
     },
+    "./helpers": {
+      "types": "./lib/types/helpers.d.ts",
+      "default": "./lib/helpers.js"
+    },
     "./src/*": "./src/*",
     "./package.json": "./package.json"
   },
   "files": [
     "lib/index.js",
     "lib/invariant.js",
+    "lib/helpers.js",
     "lib/types/**/*.d.ts"
   ],
   "license": "MIT",
   "peerDependencies": {
-    "@deepseek-ai/dsh-shell": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-invariants": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-sandbox": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-sandbox-policy": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-shell": "^0.2.0-rc.1",
+    "@deepseek-ai/dsh-invariants": "^0.2.0-rc.1",
+    "@deepseek-ai/dsh-sandbox": "^0.2.0-rc.1",
+    "@deepseek-ai/dsh-sandbox-policy": "^0.2.0-rc.1",
     "@deepseek-ai/cordis": "^4.0.1"
   },
   "dependencies": {
-    "@deepseek-ai/dsh-pwsh-sandbox": "^0.1.0-rc.6",
-    "@cmx666/dsh-niu-local": "^0.1.0-rc.6"
+    "@deepseek-ai/dsh-pwsh-sandbox": "^0.2.0-rc.1",
+    "@cmx666/dsh-niu-local": "^0.2.0-rc.1"
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-shell": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-invariants": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-sandbox": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-sandbox-policy": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-subprocess-local": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-shell": "^0.2.0-rc.1",
+    "@deepseek-ai/dsh-invariants": "^0.2.0-rc.1",
+    "@deepseek-ai/dsh-sandbox": "^0.2.0-rc.1",
+    "@deepseek-ai/dsh-sandbox-policy": "^0.2.0-rc.1",
+    "@deepseek-ai/dsh-session-projection": "^0.2.0-rc.1",
+    "@deepseek-ai/dsh-pwsh-sandbox": "^0.2.0-rc.1",
+    "@deepseek-ai/dsh-subprocess-local": "^0.2.0-rc.1",
     "@deepseek-ai/cordis": "^4.0.1"
   }
 }
