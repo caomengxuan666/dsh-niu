@@ -7,7 +7,7 @@ Niubash support for [DeepSeek Harness](https://github.com/caomengxuan666/deepsee
 Install Niubash first and make `niu.exe` available on `PATH`. Then run one command:
 
 ```sh
-dsh plugin --profile web add @cmx666/dsh-niu-bundle@0.1.0-rc.9
+dsh plugin --profile web add @cmx666/dsh-niu-bundle@0.2.0-rc.1
 ```
 
 Start DSH normally:
