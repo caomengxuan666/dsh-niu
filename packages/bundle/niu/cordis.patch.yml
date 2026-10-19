@@ -1,4 +1,14 @@
-# Enable the Niubash shell provider and bash tool for Windows profiles.
+# Host-plane rows for the Niubash bundle. The model-facing shell tool rows
+# also live inside the agent presets; presets/*.patch.yml overrides those.
+#
+# The tool-bash row deliberately has no profile-local copy of
+# @deepseek-ai/dsh-tool-bash behind it: the running dsh installation always
+# ships a tool-bash built for its own line, and the compatibility gate denies
+# profile rows whose resolved manifest demands another dsh version (a profile
+# dependency like ^0.2.0-rc.1 resolves to the newest 0.2.0 prerelease, whose
+# exact-version peers fail on 0.2.1 runtimes). Leaving the package out lets
+# the row resolve to the installation copy, which is always compatible with
+# the runtime that provides it. See issue #2.
 - id: pwsh-sandbox
   name: '@deepseek-ai/dsh-pwsh-sandbox'
   disabled: true
