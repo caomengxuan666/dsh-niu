@@ -7,16 +7,16 @@ Niubash support for [DeepSeek Harness](https://github.com/caomengxuan666/deepsee
 Install Niubash first and make `niu.exe` available on `PATH`. Then run one command:
 
 ```sh
-dsh plugin --profile web add @cmx666/dsh-niu-bundle@0.2.0-rc.1
+dsh plugin --profile web add @cmx666/dsh-niu-bundle@0.2.1-rc.1
 ```
 
-Start DSH normally:
+The bundle line must match the DSH release: `0.2.1-rc.1` targets DSH `0.2.1-rc.2` (the compatibility gate skips the whole bundle on any other line, with a diagnostic). Start DSH normally:
 
 ```sh
 dsh web
 ```
 
-The bundle enables `niu-sandbox` and `tool-bash`, disables the PowerShell shell/tool rows, adds the Niubash card under Settings > Plugins, and moves Session export into the session action group.
+The bundle enables `niu-sandbox` and `tool-bash`, disables the PowerShell shell/tool rows (both at the profile top level and inside the `standard`, `ptc`, and `cordis` agent presets), adds the Niubash card under Settings > Plugins, and moves Session export into the session action group. The `tool-bash` rows resolve to the dsh installation's own copy, so no stale second copy of the tool ever enters the profile.
 
 ## Packages
 
